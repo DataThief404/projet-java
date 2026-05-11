@@ -1,0 +1,27 @@
+POST http://localhost:8081/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "email": "admin@test.com",
+  "password": "admin"
+}
+
+###
+
+POST http://localhost:8081/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@test.com",
+  "password": "admin"
+}
+
+
+
+### In power shell
+### REGISTER:
+### Invoke-RestMethod -Uri "http://localhost:8081/api/auth/register" -Method POST -ContentType "application/json" -Body '{"username":"admin","email":"admin@test.com","password":"admin"}'
+
+### LOGIN:
+### Invoke-RestMethod -Uri "http://localhost:8081/api/auth/login" -Method POST -ContentType "application/json" -Body '{"email":"admin@test.com","password":"admin"}'
