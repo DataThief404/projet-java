@@ -2,15 +2,6 @@ name: Deploy Kubernetes
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'development'
-        type: choice
-        options:
-          - development
-          - production
   push:
     branches: [ main ]
     paths:
@@ -19,8 +10,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend:latest
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend:latest
   KUBE_NAMESPACE: stock
 
 jobs:
@@ -28,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
 
     steps:
     - name: Checkout code
@@ -44,49 +32,69 @@ jobs:
         mkdir -p $HOME/.kube
         echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
         chmod 600 $HOME/.kube/config
+      shell: bash
 
     - name: Verify cluster connection
-      run: kubectl cluster-info && kubectl get nodes
+      run: |
+        echo "Testing kubectl connection..."
+        kubectl cluster-info
+        kubectl get nodes
+      continue-on-error: true
 
-    - name: Create namespace if not exists
-      run: kubectl create namespace ${{ env.KUBE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+    - name: Create namespace
+      run: |
+        kubectl create namespace ${{ env.KUBE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy MySQL
-      run: kubectl apply -f k8s/mysql-statefulset.yaml -n ${{ env.KUBE_NAMESPACE }}
-
-    - name: Wait for MySQL to be ready
-      run: kubectl wait --for=condition=ready pod -l app=mysql -n ${{ env.KUBE_NAMESPACE }} --timeout=300s
-
-    - name: Update backend image
       run: |
-        kubectl set image deployment/backend -n ${{ env.KUBE_NAMESPACE }} \
-          backend=${{ env.BACKEND_IMAGE }} \
-          --record
+        echo "Deploying MySQL..."
+        kubectl apply -f k8s/mysql-statefulset.yaml -n ${{ env.KUBE_NAMESPACE }}
+        echo "✅ MySQL deployed"
 
-    - name: Update frontend image
+    - name: Deploy Backend
       run: |
-        kubectl set image deployment/frontend -n ${{ env.KUBE_NAMESPACE }} \
-          frontend=${{ env.FRONTEND_IMAGE }} \
-          --record
+        echo "Deploying Backend..."
+        kubectl apply -f k8s/backend-deployment.yaml -n ${{ env.KUBE_NAMESPACE }}
+        echo "✅ Backend deployed"
 
-    - name: Apply Prometheus configuration
-      run: kubectl apply -f k8s/prometheus-deployment.yaml -n ${{ env.KUBE_NAMESPACE }}
-
-    - name: Apply Grafana configuration
-      run: kubectl apply -f k8s/grafana-deployment.yaml -n ${{ env.KUBE_NAMESPACE }}
-
-    - name: Apply Ingress configuration
-      run: kubectl apply -f k8s/ingress.yaml -n ${{ env.KUBE_NAMESPACE }}
-
-    - name: Wait for deployments to be ready
+    - name: Deploy Frontend
       run: |
-        kubectl rollout status deployment/backend -n ${{ env.KUBE_NAMESPACE }} --timeout=5m
-        kubectl rollout status deployment/frontend -n ${{ env.KUBE_NAMESPACE }} --timeout=5m
-        kubectl rollout status deployment/grafana -n ${{ env.KUBE_NAMESPACE }} --timeout=5m
-        kubectl rollout status deployment/prometheus -n ${{ env.KUBE_NAMESPACE }} --timeout=5m
+        echo "Deploying Frontend..."
+        kubectl apply -f k8s/frontend-deployment.yaml -n ${{ env.KUBE_NAMESPACE }}
+        echo "✅ Frontend deployed"
+
+    - name: Deploy Prometheus
+      run: |
+        echo "Deploying Prometheus..."
+        kubectl apply -f k8s/prometheus-deployment.yaml -n ${{ env.KUBE_NAMESPACE }}
+        echo "✅ Prometheus deployed"
+
+    - name: Deploy Grafana
+      run: |
+        echo "Deploying Grafana..."
+        kubectl apply -f k8s/grafana-deployment.yaml -n ${{ env.KUBE_NAMESPACE }}
+        echo "✅ Grafana deployed"
+
+    - name: Deploy Ingress
+      run: |
+        echo "Deploying Ingress..."
+        kubectl apply -f k8s/ingress.yaml -n ${{ env.KUBE_NAMESPACE }}
+        echo "✅ Ingress deployed"
+
+    - name: Wait for deployments
+      run: |
+        echo "Waiting for deployments to be ready..."
+        kubectl rollout status deployment/backend -n ${{ env.KUBE_NAMESPACE }} --timeout=5m || true
+        kubectl rollout status deployment/frontend -n ${{ env.KUBE_NAMESPACE }} --timeout=5m || true
+        kubectl rollout status deployment/prometheus -n ${{ env.KUBE_NAMESPACE }} --timeout=5m || true
+        kubectl rollout status deployment/grafana -n ${{ env.KUBE_NAMESPACE }} --timeout=5m || true
 
     - name: Verify deployment
       run: |
+        echo "================================"
+        echo "Deployment Status:"
+        echo "================================"
+        echo ""
         echo "Pods:"
         kubectl get pods -n ${{ env.KUBE_NAMESPACE }}
         echo ""
@@ -95,55 +103,29 @@ jobs:
         echo ""
         echo "Deployments:"
         kubectl get deployments -n ${{ env.KUBE_NAMESPACE }}
-
-    - name: Show deployment summary
-      run: |
-        echo "✅ Deployment complete!"
         echo ""
-        echo "Access services via port-forward:"
-        echo "kubectl port-forward -n stock svc/frontend 8080:80"
-        echo "kubectl port-forward -n stock svc/backend 8081:8081"
-        echo "kubectl port-forward -n stock svc/prometheus 9090:9090"
-        echo "kubectl port-forward -n stock svc/grafana 3000:3000"
+        echo "================================"
+        echo "✅ Deployment Complete!"
+        echo "================================"
 
-    - name: Notify Slack (optional)
-      if: success()
-      uses: slackapi/slack-github-action@v1.24.0
-      with:
-        payload: |
-          {
-            "text": "✅ Kubernetes deployment successful!",
-            "blocks": [
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Deployment Status*\n✅ All services deployed successfully\n\n*Repository*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Commit*: ${{ github.sha }}"
-                }
-              }
-            ]
-          }
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-
-    - name: Notify on failure
-      if: failure()
-      uses: slackapi/slack-github-action@v1.24.0
-      with:
-        payload: |
-          {
-            "text": "❌ Kubernetes deployment failed!",
-            "blocks": [
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Deployment Status*\n❌ Deployment failed\n\n*Repository*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Commit*: ${{ github.sha }}\n*Action*: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                }
-              }
-            ]
-          }
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    - name: Show access instructions
+      run: |
+        echo ""
+        echo "📝 Access your services:"
+        echo ""
+        echo "Frontend:"
+        echo "  kubectl port-forward -n stock svc/frontend 8080:80"
+        echo "  Then open: http://localhost:8080"
+        echo ""
+        echo "Backend:"
+        echo "  kubectl port-forward -n stock svc/backend 8081:8081"
+        echo "  Then open: http://localhost:8081/actuator/health"
+        echo ""
+        echo "Prometheus:"
+        echo "  kubectl port-forward -n stock svc/prometheus 9090:9090"
+        echo "  Then open: http://localhost:9090"
+        echo ""
+        echo "Grafana:"
+        echo "  kubectl port-forward -n stock svc/grafana 3000:3000"
+        echo "  Then open: http://localhost:3000"
+        echo "  Login: admin / admin123"

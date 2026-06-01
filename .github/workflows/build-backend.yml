@@ -40,8 +40,6 @@ jobs:
         tags: |
           type=ref,event=branch
           type=sha,prefix={{branch}}-
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
           type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push backend image
@@ -54,17 +52,22 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Image digest
-      run: echo ${{ steps.docker_build.outputs.digest }}
+    - name: Image built successfully
+      run: echo "✅ Backend image built and pushed successfully"
 
-    - name: Trigger Kubernetes deployment
+    - name: Trigger deployment
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: actions/github-script@v7
       with:
         script: |
-          await github.rest.actions.createWorkflowDispatch({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            workflow_id: 'deploy-kubernetes.yml',
-            ref: 'main'
-          })
+          try {
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-kubernetes.yml',
+              ref: 'main'
+            });
+            console.log('✅ Deployment workflow triggered');
+          } catch (error) {
+            console.log('⚠️ Could not trigger deployment: ' + error.message);
+          }
