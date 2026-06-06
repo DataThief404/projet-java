@@ -123,3 +123,5 @@ jobs:
         echo "kubectl port-forward -n stock svc/backend 8081:8081"
         echo "kubectl port-forward -n stock svc/prometheus 9090:9090"
         echo "kubectl port-forward -n stock svc/grafana 3000:3000"
+
+# etape 1 
